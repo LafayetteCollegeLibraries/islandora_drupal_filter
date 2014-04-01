@@ -205,32 +205,65 @@ public class DrupalAuthModule
         return true;
     }
 
-    private Connection connectToDB(String server, String database, String user, String pass, String port) {
+    private Connection connectToDB(String server, String database, String user, String pass, String port, String dBType) {
+
         //assuming all drupal installs use mysql as the db.
         if (port == null) {
             port = "3306";
         }
+
         Connection conn = null;
-        try {
-            Class.forName("com.mysql.jdbc.Driver").newInstance();
-        } catch (Exception ex) {
-            logger.error("Exception: " + ex.getMessage());
 
-        }
+	if(dBType.equals("postgresql")) { // For postgres...
 
-        try {
-            conn =
-                    DriverManager.getConnection("jdbc:mysql://" + server + ":" + port + "/" + database + "?" +
-                    "user=" + user + "&password=" + pass);
+	    try {
 
-        } catch (SQLException ex) {
-            // handle any errors
-            logger.error("SQLException: " + ex.getMessage());
-            logger.error("SQLState: " + ex.getSQLState());
-            logger.error("VendorError: " + ex.getErrorCode());
-            logger.error("Error Connecting to Database server " + server + " port " + port + " database " + database);
-            return null;
-        }
+		Class.forName("org.postgresql.Driver").newInstance();
+	    } catch (Exception ex) {
+
+		logger.error("Exception: " + ex.getMessage());
+	    }
+
+	    try {
+		conn = DriverManager.getConnection("jdbc:postgresql://" + server + ":" + port + "/" + database + "?" +
+						   "user=" + user + "&password=" + pass);
+	    } catch (SQLException ex) {
+		// handle any errors
+		logger.error("SQLException: " + ex.getMessage());
+		logger.error("SQLState: " + ex.getSQLState());
+		logger.error("VendorError: " + ex.getErrorCode());
+		logger.error("Error Connecting to Database server " + server + " port " + port + " database " + database);
+		return null;
+	    }
+	} else { // Default to MySQL
+
+	    if(!dBType.equals("mysql")) {
+
+		logger.warn("No database type specified in the file filter-drupal.xml");
+	    }
+
+	    try {
+
+		Class.forName("com.mysql.jdbc.Driver").newInstance();
+	    } catch (Exception ex) {
+
+		logger.error("Exception: " + ex.getMessage());
+	    }
+
+	    try {
+		conn =
+		    DriverManager.getConnection("jdbc:mysql://" + server + ":" + port + "/" + database + "?" +
+						"user=" + user + "&password=" + pass);
+	    } catch (SQLException ex) {
+		// handle any errors
+		logger.error("SQLException: " + ex.getMessage());
+		logger.error("SQLState: " + ex.getSQLState());
+		logger.error("VendorError: " + ex.getErrorCode());
+		logger.error("Error Connecting to Database server " + server + " port " + port + " database " + database);
+		return null;
+	    }
+	}
+
         return conn;
     }
 
@@ -246,6 +279,10 @@ public class DrupalAuthModule
         //we may want to implement a connection pool or something here if performance gets to be
         //an issue.  on the plus side mysql connections are fairly lightweight compared to postgres
         //and the database only gets hit once per user session so we may be ok.
+	
+	// The XML Attribute specifying the RDBMS
+	String dBType;
+
         File drupalConnectionInfo = null;
 
         //if the user is anonymous don't check the database just give the anonymous role
@@ -281,37 +318,46 @@ public class DrupalAuthModule
                 user = connection.attributeValue("user");
                 pass = connection.attributeValue("password");
                 port = connection.attributeValue("port");
+
+		dBType = connection.attributeValue("dbtype");
+		if(dBType == null) {
+
+		    dBType = "mysql";
+		}
+
                 Element sqlElement = connection.element("sql");
                 sql = sqlElement.getTextTrim();
-                Connection conn = connectToDB(server, database, user, pass, port);
+                Connection conn = connectToDB(server, database, user, pass, port, dBType);
                 if (conn != null) {
-                    PreparedStatement pstmt = conn.prepareStatement(sql);
-                    pstmt.setString(2, password);
-                    pstmt.setString(1, userid);
-                    ResultSet rs = pstmt.executeQuery();
-                    boolean hasMoreRecords = rs.next();
-                    if (hasMoreRecords && attributeValues == null) {
-                        username = userid;
-                        int numericId = rs.getInt("userid");
-                        this.password = password;
-                        attributeValues = new HashSet<String>();
-                        if (numericId == 0) {
-                            attributeValues.add("anonymous");//add the role anonymous in case user in drupal is not associated with any Drupal roles.
-                        } else if (numericId == 1) {
-                            attributeValues.add("administrator");
-                        } else {
-                            attributeValues.add("authenticated user");
-                        }
-                        successLogin = true;
-                    }
-                    while (hasMoreRecords) {
-                        String role = rs.getString("role");
-                        if (role != null) {
-                            logger.debug("DrupalAuthModule Added role: " + role);
-                            attributeValues.add(role);
-                        }
-                        hasMoreRecords = rs.next();
-                    }
+
+		    PreparedStatement pstmt = conn.prepareStatement(sql);
+		    pstmt.setString(2, password);
+		    pstmt.setString(1, userid);
+		    
+		    ResultSet rs = pstmt.executeQuery();
+		    boolean hasMoreRecords = rs.next();
+		    if (hasMoreRecords && attributeValues == null) {
+			username = userid;
+			int numericId = rs.getInt("userid");
+			this.password = password;
+			attributeValues = new HashSet<String>();
+			if (numericId == 0) {
+			    attributeValues.add("anonymous");//add the role anonymous in case user in drupal is not associated with any Drupal roles.
+			} else if (numericId == 1) {
+			    attributeValues.add("administrator");
+			} else {
+			    attributeValues.add("authenticated user");
+			}
+			successLogin = true;
+		    }
+		    while (hasMoreRecords) {
+			String role = rs.getString("role");
+			if (role != null) {
+			    logger.debug("DrupalAuthModule Added role: " + role);
+			    attributeValues.add(role);
+			}
+			hasMoreRecords = rs.next();
+		    }
                     conn.close();
                 }
             } catch (SQLException ex) {
@@ -335,10 +381,4 @@ public class DrupalAuthModule
         successLogin = true;
 
     }
-
-
-
-
-
-
 }
